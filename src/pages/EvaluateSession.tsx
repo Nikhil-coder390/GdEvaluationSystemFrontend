@@ -44,12 +44,12 @@ const EvaluateSession = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
-  
+
   const [session, setSession] = useState<GDSession | null>(null);
   const [selectedStudent, setSelectedStudent] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  
+
   const [criteria, setCriteria] = useState<EvaluationCriteria>({
     articulation: 5,
     relevance: 5,
@@ -57,13 +57,14 @@ const EvaluateSession = () => {
     nonVerbalCommunication: 5,
     impression: 5,
   });
-  
+
+  const [evaluatedStudents, setEvaluatedStudents] = useState<string[]>([]);
+
   useEffect(() => {
     if (id) {
       const foundSession = getSessionById(id);
       if (foundSession) {
         setSession(foundSession);
-        // Set first participant as default selected student
         if (foundSession.participants.length > 0) {
           setSelectedStudent(foundSession.participants[0]);
         }
@@ -78,31 +79,34 @@ const EvaluateSession = () => {
     }
     setIsLoading(false);
   }, [id, getSessionById, toast, navigate]);
-  
+
   if (isLoading || !session || !user) {
     return <div>Loading...</div>;
   }
 
-  // Check if user is allowed to evaluate
   const isInstructor = user.role === "instructor";
-  const isEvaluator = user.role === "student" && 
+  const isEvaluator =
+    user.role === "student" &&
     session.evaluators.includes(user.rollNumber || "");
-  
+
   if (!isInstructor && !isEvaluator) {
     navigate("/dashboard");
     return null;
   }
 
-  const handleCriteriaChange = (criteriaKey: keyof EvaluationCriteria, value: number) => {
-    setCriteria(prev => ({
+  const handleCriteriaChange = (
+    criteriaKey: keyof EvaluationCriteria,
+    value: number
+  ) => {
+    setCriteria((prev) => ({
       ...prev,
-      [criteriaKey]: value
+      [criteriaKey]: value,
     }));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!selectedStudent) {
       toast({
         title: "Error",
@@ -111,22 +115,19 @@ const EvaluateSession = () => {
       });
       return;
     }
-    
+
     setIsSubmitting(true);
-    
+
     try {
-      await submitEvaluation(
-        session.id,
-        selectedStudent,
-        criteria
-      );
-      
+      await submitEvaluation(session.id, selectedStudent, criteria);
+
       toast({
         title: "Success",
         description: "Evaluation submitted successfully",
       });
-      
-      // Reset criteria to default values
+
+      setEvaluatedStudents((prev) => [...prev, selectedStudent]);
+
       setCriteria({
         articulation: 5,
         relevance: 5,
@@ -134,17 +135,22 @@ const EvaluateSession = () => {
         nonVerbalCommunication: 5,
         impression: 5,
       });
-      
-      // Keep the same student selected or select the next one
+
       const currentIndex = session.participants.indexOf(selectedStudent);
-      if (currentIndex < session.participants.length - 1) {
-        setSelectedStudent(session.participants[currentIndex + 1]);
+      const nextStudent = session.participants
+        .slice(currentIndex + 1)
+        .find((roll) => !evaluatedStudents.includes(roll) && roll !== selectedStudent);
+
+      if (nextStudent) {
+        setSelectedStudent(nextStudent);
+      } else {
+        setSelectedStudent(""); // no more students left
       }
-      
     } catch (error: any) {
       toast({
         title: "Error",
-        description: error.message || "Failed to submit evaluation. Please try again.",
+        description:
+          error.message || "Failed to submit evaluation. Please try again.",
         variant: "destructive",
       });
     } finally {
@@ -180,17 +186,24 @@ const EvaluateSession = () => {
                       <SelectValue placeholder="Select a student" />
                     </SelectTrigger>
                     <SelectContent>
-                      {session.participants.map((rollNumber) => (
-                        <SelectItem key={rollNumber} value={rollNumber}>
-                          {rollNumber}
-                        </SelectItem>
-                      ))}
+                      {session.participants.map((rollNumber) => {
+                        const isEvaluated = evaluatedStudents.includes(rollNumber);
+                        return (
+                          <SelectItem
+                            key={rollNumber}
+                            value={rollNumber}
+                            disabled={isEvaluated}
+                          >
+                            {rollNumber} {isEvaluated && "(Evaluated)"}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>
-                
+
                 <Separator />
-                
+
                 <div className="space-y-6">
                   {Object.entries(criteriaLabels).map(([key, label]) => (
                     <div key={key} className="space-y-2">
@@ -206,19 +219,26 @@ const EvaluateSession = () => {
                         max={10}
                         step={1}
                         value={[criteria[key as keyof EvaluationCriteria]]}
-                        onValueChange={(values) => 
-                          handleCriteriaChange(key as keyof EvaluationCriteria, values[0])
+                        onValueChange={(values) =>
+                          handleCriteriaChange(
+                            key as keyof EvaluationCriteria,
+                            values[0]
+                          )
                         }
                       />
                       <p className="text-sm text-muted-foreground">
-                        {criteriaDescriptions[key as keyof typeof criteriaDescriptions]}
+                        {
+                          criteriaDescriptions[
+                            key as keyof typeof criteriaDescriptions
+                          ]
+                        }
                       </p>
                     </div>
                   ))}
                 </div>
-                
+
                 <div className="flex justify-end pt-4">
-                  <Button type="submit" disabled={isSubmitting}>
+                  <Button type="submit" disabled={isSubmitting || !selectedStudent}>
                     {isSubmitting ? (
                       "Submitting..."
                     ) : (
@@ -233,7 +253,7 @@ const EvaluateSession = () => {
             </CardContent>
           </Card>
         </div>
-        
+
         <div>
           <Card>
             <CardHeader>
@@ -244,22 +264,26 @@ const EvaluateSession = () => {
                 <Label className="text-sm text-muted-foreground">Topic</Label>
                 <p className="font-medium">{session.topic}</p>
               </div>
-              
+
               <div>
                 <Label className="text-sm text-muted-foreground">Date</Label>
-                <p className="font-medium">{format(new Date(session.date), "PPP")}</p>
+                <p className="font-medium">
+                  {format(new Date(session.date), "PPP")}
+                </p>
               </div>
-              
+
               <div>
                 <Label className="text-sm text-muted-foreground">Group</Label>
-                <p className="font-medium">{session.groupName} ({session.groupNumber})</p>
+                <p className="font-medium">
+                  {session.groupName} ({session.groupNumber})
+                </p>
               </div>
-              
+
               <Separator />
-              
+
               <div className="pt-2">
-                <Button 
-                  variant="outline" 
+                <Button
+                  variant="outline"
                   className="w-full"
                   onClick={() => navigate(`/session/${session.id}`)}
                 >

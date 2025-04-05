@@ -1,4 +1,3 @@
-
 import React, { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { Button } from "@/components/ui/button";
@@ -18,6 +17,8 @@ import {
 } from "@/components/ui/table";
 import { FileDown } from "lucide-react";
 import { GDSession, Evaluation, EvaluationCriteria } from "@/types";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 
 const criteriaLabels = {
   articulation: "Articulation",
@@ -33,11 +34,11 @@ const SessionResults = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
-  
+
   const [session, setSession] = useState<GDSession | null>(null);
   const [evaluations, setEvaluations] = useState<Evaluation[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
+
   useEffect(() => {
     if (id) {
       const foundSession = getSessionById(id);
@@ -55,7 +56,7 @@ const SessionResults = () => {
     }
     setIsLoading(false);
   }, [id, getSessionById, getEvaluationsForSession, toast, navigate]);
-  
+
   if (isLoading || !session || !user || user.role !== "instructor") {
     if (!isLoading && user?.role !== "instructor") {
       toast({
@@ -69,10 +70,44 @@ const SessionResults = () => {
   }
 
   const exportToExcel = () => {
-    toast({
-      title: "Export Feature",
-      description: "This will export results to Excel in the full implementation",
+    if (!session) return;
+
+    const worksheetData: any[] = [];
+
+    // Table header
+    worksheetData.push([
+      "Roll Number",
+      ...Object.values(criteriaLabels),
+      "Average",
+    ]);
+
+    session.participants.forEach((rollNumber) => {
+      const { finalScores } = calculateScores(session.id, rollNumber);
+
+      const scores = Object.keys(criteriaLabels).map(
+        (key) => finalScores[key as keyof EvaluationCriteria].toFixed(1)
+      );
+
+      const avg =
+        Object.values(finalScores).reduce((sum, score) => sum + score, 0) / 5;
+
+      worksheetData.push([rollNumber, ...scores, avg.toFixed(1)]);
     });
+
+    const worksheet = XLSX.utils.aoa_to_sheet(worksheetData);
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, "Session Results");
+
+    const excelBuffer = XLSX.write(workbook, {
+      bookType: "xlsx",
+      type: "array",
+    });
+
+    const blob = new Blob([excelBuffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    saveAs(blob, `Session_${session.topic}_Results.xlsx`);
   };
 
   return (
@@ -112,14 +147,11 @@ const SessionResults = () => {
                 </TableHeader>
                 <TableBody>
                   {session.participants.map((rollNumber) => {
-                    const { peerAverage, instructorScores, finalScores } = calculateScores(
-                      session.id,
-                      rollNumber
-                    );
-                    
+                    const { finalScores } = calculateScores(session.id, rollNumber);
+
                     const finalAvg =
                       Object.values(finalScores).reduce((sum, score) => sum + score, 0) / 5;
-                    
+
                     return (
                       <TableRow key={rollNumber}>
                         <TableCell className="font-medium">{rollNumber}</TableCell>
@@ -151,7 +183,7 @@ const SessionResults = () => {
                   session.id,
                   rollNumber
                 );
-                
+
                 return (
                   <div key={rollNumber} className="space-y-3">
                     <h3 className="text-lg font-medium">Student: {rollNumber}</h3>
